@@ -1,19 +1,19 @@
 var data = {};
 
-onmessage = function(e) {
-	//console.log('Message received from main script');
-	//console.log(e.data);
+onmessage = function (e) {
+  //console.log('Message received from main script');
+  //console.log(e.data);
 
-	if (e.data.msg == 'set_data'){
-		data = e.data.data;
-		//console.log('data', data);
-	}
+  if (e.data.msg == 'set_data') {
+    data = e.data.data;
+    //console.log('data', data);
+  }
 
-	if (e.data.msg == 'process'){
-		//console.log('data (later)', data);
-		var out = process(e.data.item, e.data.enchants);
-		//console.log('work complete');
-	}
+  if (e.data.msg == 'process') {
+    //console.log('data (later)', data);
+    var out = process(e.data.item, e.data.enchants);
+    //console.log('work complete');
+  }
 }
 
 var work_penalty = [0, 1, 3, 7, 15, 31, 63, 127, 255, 511];
@@ -25,227 +25,289 @@ var work_penalty = [0, 1, 3, 7, 15, 31, 63, 127, 255, 511];
 // potential future optimization: replace same-cost enchantments when the same key, so that we can
 // cull more paths during the expansion phase
 
-function process(item, enchants_raw){
+function process(item, enchants_raw) {
 
-	// turn list of desired enchantments into objects including their weight & score, keyed by character.
-	// also create an array of characters we'll use to build the paths.
+  //console.log(item, enchants_raw);
+  //console.log(data);
 
-	var enchants = {};
-	var costs = {};
-	var items = ['ITEM'];
+  // item -> what item to enchant
+  // enchants_raw -> [["enchant name 1", level], ...]
 
-	for (var i=0; i<enchants_raw.length; i++){
-		var e_info = data.enchants[enchants_raw[i][0]];
-		var weight = parseInt(e_info.weight);
-		var score = weight * enchants_raw[i][1];
+  // data.enchants -> data.js
 
-		var key = String.fromCharCode(i + 97);
+  // turn list of desired enchantments into objects including their weight & score, keyed by character.
+  // also create an array of characters we'll use to build the paths.
 
-		enchants[key] = {
-			'enchant'	: enchants_raw[i][0],
-			'level'		: enchants_raw[i][1],
-			'weight'	: weight,
-			'score'		: score
-		};
+  var enchants = {};
+  var costs = {};
+  var items = ['ITEM'];
 
-		costs[key] = score;
+  for (var i = 0; i < enchants_raw.length; i++) {
+    // enchants_raw[i][0] -> "enchant name i"
+    /*
+      e_info -> {
+        levelMax: "x", weight: "y", incompatible: ["enchant name"], items: ["item"]
+      }
+    */
+    // weight -> enchantment cost multiplier
+    // score -> weight * level
 
-		items.push(key);
-	}
+    var e_info = data.enchants[enchants_raw[i][0]];
+    var weight = parseInt(e_info.weight);
+    var score = weight * enchants_raw[i][1];
+
+    // key -> 'a', 'b', 'c', ...
+    var key = String.fromCharCode(i + 97);
 
 
-	// now we have the list of items, start to expand them
+    /*
+      enchants -> {
+        a: {
+          enchant: "enchant name",
+          level,
+          weight,
+          score: weight * level
+        },
+        b: ...
+      }
+    */
 
-	// start by creating a single (incomplete) path
-	var incomplete_paths = [
-		{
-			'cost' : 0,
-			'remaining' : items,
-			'steps' : [],
-			'workings' : {}
-		}
-	];
+    enchants[key] = {
+      'enchant': enchants_raw[i][0],
+      'level': enchants_raw[i][1],
+      'weight': weight,
+      'score': score
+    };
 
-	incomplete_paths[0].workings['ITEM'] = 0;
-	for (var i=0; i<items.length; i++) incomplete_paths[0].workings[items[i]] = 0;
+    /*
+      costs -> {
+        a: score,
+        b: ...
+      }
+    */
+    costs[key] = score;
 
-	var complete_paths = [];
-	var best_path = {'cost' : 999999};
-	var paths_tried = 0;
+    // items -> ["ITEM", "a", "b", "c", ...]
+    items.push(key);
+  }
 
-	// while we have incomplete paths, iterate over each one, and find every possible next step.
-	// for each next step, create a new path, either on the incomplete_paths list (is remaining.length > 1),
-	// or the complete_paths list.
 
-	var n = 1;
-	while (incomplete_paths.length > 0){
+  // now we have the list of items, start to expand them
 
-		var total_tries = 0;
-		var new_incomplete_paths = [];
+  // start by creating a single (incomplete) path
+  var incomplete_paths = [
+    {
+      'cost': 0,
+      'maxCost': 0,
+      'remaining': items,
+      'steps': [],
+      'workings': {}
+    }
+  ];
 
-		for (var i=0; i<incomplete_paths.length; i++){
+  incomplete_paths[0].workings['ITEM'] = 0;
+  for (var i = 0; i < items.length; i++) incomplete_paths[0].workings[items[i]] = 0;
 
-			var ret = explode_path(incomplete_paths[i], costs);
-			paths = ret.paths;
-			total_tries += ret.tries;
+  var best_path = { 'cost': Infinity, 'maxCost': Infinity };
+  var paths_tried = 0;
 
-			for (var j=0; j<paths.length; j++){
-				if (paths[j].remaining.length > 1){
-					new_incomplete_paths.push(paths[j]);
-				}else{
-					//delete paths[j].remaining;
-					//complete_paths.push(paths[j]);
-					paths_tried++;
-					if (paths[j].cost < best_path.cost){
-						best_path = paths[j];
-						//console.log('found best path!', paths[j].cost);
-					}
-				}
-			}
-		}
+  // while we have incomplete paths, iterate over each one, and find every possible next step.
+  // for each next step, create a new path, either on the incomplete_paths list (is remaining.length > 1),
+  // or the complete_paths list.
 
-		incomplete_paths = new_incomplete_paths;
+  var n = 1;
+  while (incomplete_paths.length > 0) {
 
-		//console.log("completed one step");
-		//console.log("COMPLETE", complete_paths);
-		//console.log("INCOMPLETE", JSON.stringify(incomplete_paths));
+    var total_tries = 0;
+    var new_incomplete_paths = [];
 
-		//for (var i=0; i<incomplete_paths.length; i++){
-		//	console.log("INCOMPLETE", JSON.stringify(incomplete_paths[i]));
-		//}
+    for (var i = 0; i < incomplete_paths.length; i++) {
 
-		postMessage({
-			'msg': 'stage_complete',
-			'num': n,
-			'tries': total_tries,
-		});
-		n++;
+      var ret = explode_path(incomplete_paths[i], costs);
+      paths = ret.paths;
+      total_tries += ret.tries;
 
-		//console.log("INCOMPLETE", incomplete_paths);
-		//return;
-	}
+      for (var j = 0; j < paths.length; j++) {
+        if (paths[j].remaining.length > 1) {
+          new_incomplete_paths.push(paths[j]);
+        } else {
+          //delete paths[j].remaining;
+          //complete_paths.push(paths[j]);
+          paths_tried++;
+          if (paths[j].cost < best_path.cost || (paths[j].cost === best_path.cost && paths[j].maxCost < best_path.maxCost)) {
+            best_path = paths[j];
+            //console.log('found best path!', paths[j].cost);
+          }
+        }
+      }
+    }
 
-	//console.log("ALL DONE");
-	//console.log(complete_paths);
+    incomplete_paths = new_incomplete_paths;
 
-	//console.log(best_path);
-	//console.log('tried', paths_tried);
+    //console.log("completed one step");
+    //console.log("COMPLETE", complete_paths);
+    //console.log("INCOMPLETE", JSON.stringify(incomplete_paths));
 
-	postMessage({
-		'msg': 'complete',
-		'item' : item,
-		'cost' : best_path.cost,
-		'path': best_path.steps,
-		'enchants': enchants,
-		'tried' : paths_tried,
-	});
+    //for (var i=0; i<incomplete_paths.length; i++){
+    //	console.log("INCOMPLETE", JSON.stringify(incomplete_paths[i]));
+    //}
 
-	//return complete_paths;
+    postMessage({
+      'msg': 'stage_complete',
+      'num': n,
+      'tries': total_tries,
+    });
+    n++;
+
+    //console.log("INCOMPLETE", incomplete_paths);
+    //return;
+  }
+
+  //console.log("ALL DONE");
+  //console.log(complete_paths);
+
+  //console.log(best_path);
+  //console.log('tried', paths_tried);
+
+  postMessage({
+    'msg': 'complete',
+    'item': item,
+    'cost': best_path.cost,
+    'path': best_path.steps,
+    'enchants': enchants,
+    'tried': paths_tried,
+  });
+
+  //return complete_paths;
 }
 
-function explode_path(path, costs){
+function explode_path(path, costs) {
 
-	// build a hash of flat-key => path, so we only have a single path to
-	// each destination - we will flatten this into an array when we return.
+  /*
+    path -> {
+      'cost': 0,
+      'maxCost': 0,
+      'remaining': ["ITEM", "a", "b", "c", ...],
+      'steps': [["aItem", "bItem"], ["cItem", "dItem"], ...],
+      'workings': {
+        "aItem|bItem": Math.max(work_a, work_b) + 1
+      }
+    }
+  */
 
-	var best_paths = {};
-	var tries = 0;
+  /*
+    costs -> {
+      a: score,
+      b: ...
+    }
+  */
 
-	var len = path.remaining.length;
-	for (var a=0; a<len; a++){
-		for (var b=0; b<len; b++){
-			if (b == a) continue;
-			if (path.remaining[b] == 'ITEM') continue;
-			if (path.remaining[b].substr(0, 4) == 'ITEM') continue;
+  // build a hash of flat-key => path, so we only have a single path to
+  // each destination - we will flatten this into an array when we return.
 
-			var new_path = {
-				'cost' : 0,
-				'remaining' : [],
-				'steps' : [],
-				'workings' : {},
-			};
+  var best_paths = {};
+  var tries = 0;
 
-			for (var i=0; i<len; i++){
-				if (i != a && i != b){
-					new_path.remaining.push(path.remaining[i]);
-				}
-			}
+  var len = path.remaining.length;
+  for (var a = 0; a < len; a++) {
+    for (var b = 0; b < len; b++) {
+      if (b == a) continue;
+      if (path.remaining[b] == 'ITEM') continue;
+      if (path.remaining[b].substr(0, 4) == 'ITEM') continue;
 
-			var a_item = path.remaining[a];
-			var b_item = path.remaining[b];
-			var combined = sort_flat(a_item+'|'+b_item);
+      var new_path = {
+        'cost': 0,
+        'maxCost': 0,
+        'remaining': [],
+        'steps': [],
+        'workings': {},
+      };
 
-			new_path.remaining.push(combined);
-			new_path.remaining.sort();
+      for (var i = 0; i < len; i++) {
+        if (i != a && i != b) {
+          new_path.remaining.push(path.remaining[i]);
+        }
+      }
 
-			var work_a = path.workings[a_item];
-			var work_b = path.workings[b_item];
+      var a_item = path.remaining[a];
+      var b_item = path.remaining[b];
+      var combined = sort_flat(a_item + '|' + b_item);
 
-			var new_work = Math.max(work_a, work_b) + 1;
+      new_path.remaining.push(combined);
+      new_path.remaining.sort();
 
-			new_path.workings = { ...path.workings };
-			new_path.workings[combined] = new_work;
+      var work_a = path.workings[a_item];
+      var work_b = path.workings[b_item];
 
-			for (var i=0; i<path.steps.length; i++){
-				new_path.steps.push(path.steps[i]);;
-			}
+      var new_work = Math.max(work_a, work_b) + 1;
 
-			new_path.steps.push([a_item, b_item]);
+      new_path.workings = { ...path.workings };
+      new_path.workings[combined] = new_work;
 
-			// calculate step cost
-			// COST = score_of_sacrifice + both work penalties
-			var step_cost_enchants = calc_item_cost(b_item, costs);
-			var step_cost_penalties = work_penalty[work_a] + work_penalty[work_b];
+      for (var i = 0; i < path.steps.length; i++) {
+        new_path.steps.push(path.steps[i]);
+      }
 
-			new_path.cost = path.cost + step_cost_enchants + step_cost_penalties;
+      new_path.steps.push([a_item, b_item]);
 
-			tries++;
+      // calculate step cost
+      // COST = score_of_sacrifice + both work penalties
+      var step_cost_enchants = calc_item_cost(b_item, costs);
+      var step_cost_penalties = work_penalty[work_a] + work_penalty[work_b];
+
+      new_path.cost = path.cost + step_cost_enchants + step_cost_penalties;
+      new_path.maxCost = Math.max(step_cost_enchants + step_cost_penalties, path.maxCost);
+
+      tries++;
 
 
-			// is there already a better score
-			var flat_key = new_path.remaining.join('/');
+      // is there already a better score
+      var flat_key = new_path.remaining.join('/');
 
-			if (best_paths[flat_key]){
-				// there is an existing path for this destination - only overwrite if this is a better cost.
-				if (best_paths[flat_key].cost > new_path.cost){
-					best_paths[flat_key] = new_path;
-					//console.log('overriding path - better score');
-				}else{
-					//console.log('dropping path - same or worse score');
-				}
-			}else{
-				// first path to get to this destination
-				best_paths[flat_key] = new_path;
-			}
+      if (best_paths[flat_key]) {
+        // there is an existing path for this destination - only overwrite if this is a better cost.
+        if (best_paths[flat_key].cost > new_path.cost) {
+          best_paths[flat_key] = new_path;
+          //console.log('overriding path - better score');
+        } else if (best_paths[flat_key].cost === new_path.cost && best_paths[flat_key].maxCost > new_path.maxCost) {
+          best_paths[flat_key] = new_path;
+          //console.log('overriding path - better score');
+        } else {
+          //console.log('dropping path - worse score');
+        }
+      } else {
+        // first path to get to this destination
+        best_paths[flat_key] = new_path;
+      }
 
-			//console.log(JSON.stringify(new_path));
-		}
-	}
+      //console.log(JSON.stringify(new_path));
+    }
+  }
 
-	var out = [];
-	for (var i in best_paths){
-		out.push(best_paths[i]);
-	}
+  var out = [];
+  for (var i in best_paths) {
+    out.push(best_paths[i]);
+  }
 
-	return {
-		'paths' : out,
-		'tries' : tries,
-	};
+  return {
+    'paths': out,
+    'tries': tries,
+  };
 
 }
 
-function calc_item_cost(item, costs){
+function calc_item_cost(item, costs) {
 
-	var total = 0;
-	var bits = item.split('|');
-	for (var i=0; i<bits.length; i++){
-		total += costs[bits[i]];
-	}
-	return total;
+  var total = 0;
+  var bits = item.split('|');
+  for (var i = 0; i < bits.length; i++) {
+    total += costs[bits[i]];
+  }
+  return total;
 }
 
-function sort_flat(a){
-	var bits = a.split('|');
-	bits.sort();
-	return bits.join('|');
+function sort_flat(a) {
+  var bits = a.split('|');
+  bits.sort();
+  return bits.join('|');
 }
