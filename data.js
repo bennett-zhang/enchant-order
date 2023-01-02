@@ -1,6 +1,6 @@
 var data = {
   "enchants": {
-    /*"Soulbound": {
+    "Soulbound": {
       "levelMax": "1",
       "weight": "4",
       "incompatible": [
@@ -29,7 +29,7 @@ var data = {
         "turtle_shell",
         "crossbow"
       ]
-    },*/
+    },
     "Protection": {
       "levelMax": "4",
       "weight": "1",

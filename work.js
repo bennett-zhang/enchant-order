@@ -214,6 +214,7 @@ function explode_path(path, costs) {
       if (b == a) continue;
       if (path.remaining[b] == 'ITEM') continue;
       if (path.remaining[b].substr(0, 4) == 'ITEM') continue;
+      if (path.remaining[a] != 'ITEM' && costs[path.remaining[a]] < costs[path.remaining[b]]) continue;
 
       var new_path = {
         'cost': 0,
